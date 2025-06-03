@@ -1,11 +1,10 @@
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
 #include <ArduinoJson.h>
-#include <Keypad.h>
 #include <string.h>
 #include "Authorization.h"
+#include "Display.h"
+#include "KeypadManager.h"
 
 #define SS_PIN 10           // RFID SDA
 #define RST_PIN 9           // RFID Reset
@@ -13,6 +12,14 @@
 #define GREEN_LED_PIN 6     
 #define RELAY_PIN 8         // Türschloss (Pin8 - IN); GND - GND; VCC - 5V / Schloss: Mitte & Li/Re to test
 
+//---------------------
+//---Functions & Methods deklaration---
+//---------------------
+void resetAfterCheck();
+void SerialPrintUidForAdding(const String& uidStr);
+void addingMember(const String& uidStr);
+
+Display display(SS_PIN, RST_PIN); //SS_PIN, RST_PIN
 //---------------------
 //---Granted UIDs---
 //---------------------
@@ -25,8 +32,8 @@ const char* jsonUIDs = R"rawliteral(
   { "uid": "A3081D06", "vorname": "Bea", "nachname": "Janott", "pin": "7559" }
 ]
 )rawliteral";
- 
-AUTHORIZATION_H::Authorization auth(jsonUIDs);
+
+//Authorization::Authorization auth(jsonUIDs);
 
 //---------------------
 //---keypad---
@@ -40,45 +47,33 @@ const byte COLS = 4; //four columns
 byte rowPins[ROWS] = {A0, A1, A2, A3}; // Zeilen
 byte colPins[COLS] = {2, 3, 4, 5};     // Spalten
 
-char hexaKeys[ROWS][COLS] = {
-  {'D','C','B','A'},
-  {'#','9','6','3'},
-  {'0','8','5','2'},
-  {'*','7','4','1'}
-};
-
-Keypad keypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+KeypadManager keypadManager(rowPins, colPins, display);
 String pinCode = "";
-//---------------------
-//---lcd Display---
-//---------------------
-
-LiquidCrystal_I2C lcd(0x27, 20, 4); 
+//RFID
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
+Authorization auth(jsonUIDs, &display, &keypadManager);
 //---------------------
 //---functions---
 //---------------------
-
-void writeInLcd(const int& positionlength, const int& positionHight, const String& message) {
-  lcd.setCursor(positionlength, positionHight);
-  lcd.print(message);
-}
-
-void greeting(const String& vorname) {
-  lcd.clear();
-  digitalWrite(GREEN_LED_PIN, HIGH);
-  delay(500);
-  writeInLcd(0, 1, "Bitte Pin eingeben!");
-  writeInLcd(0, 0, "Hallo " + vorname +",");
-}
-
 void resetAfterCheck() {
   digitalWrite(RED_LED_PIN, LOW);
   digitalWrite(GREEN_LED_PIN, LOW);
   digitalWrite(RELAY_PIN, LOW);  // lock closing
-  lcd.clear();
-  writeInLcd(0, 0, "Ready for Check!");
+  display.clear();
+  display.writeInLcd(0, 0, "Ready for Check!");
+}
+
+//to add new RFIDs
+void SerialPrintUidForAdding(const String& uidStr) {
+  Serial.print("Gelesene UID: ");
+  Serial.println(uidStr);
+  display.clear();
+}
+
+// For adding New Rfids
+void addingMember(const String& uidStr){
+SerialPrintUidForAdding(uidStr); 
 }
 
 String readRFIDKey() {
@@ -91,102 +86,8 @@ String readRFIDKey() {
   return uidStr;
 }
 
-//to add new RFIDs
-void SerialPrintUidForAdding(const String& uidStr) {
-  Serial.print("Gelesene UID: ");
-  Serial.println(uidStr);
-  lcd.clear();
-}
-
-String keypadInput(const String& vorname) {
-  unsigned long startTime = millis();
-  unsigned long timeout = 10000; // 10 seconds for Input
-
-  while (millis() - startTime < timeout) {
-    char customKey = keypad.getKey();
-    if (customKey) {
-    // optional: * or # for reseting the input
-      if (customKey == '*' || customKey == '#') {
-        writeInLcd(0, 3, "Eingabe geloescht");
-        delay(1000);
-        writeInLcd(0, 3, "                        ");
-        greeting(vorname);
-        pinCode = "";
-        return pinCode;
-      }
-      // process only numbers
-      if ((customKey >= '0' && customKey <= '9') ||
-          customKey == 'A' || customKey == 'B' ||
-          customKey == 'C' || customKey == 'D') {
-        pinCode += customKey;
-
-        if (pinCode.length() == 4) {
-          Serial.print("Eingegebener PIN: "); //for testing
-          Serial.println(pinCode);            //for testing
-          return pinCode;
-        }
-      }
-    }
-  }
-  pinCode = "";
-  return pinCode; //for timeout
-}
-
-void pinCorrect(const String& vorname){
-lcd.clear();
-      writeInLcd(0, 0, "Zugang gewaehrt!");
-      writeInLcd(0, 2, "Willkommen,");
-      writeInLcd(0, 3, vorname);
-      digitalWrite(GREEN_LED_PIN, HIGH);
-      digitalWrite(RELAY_PIN, HIGH);
-      delay(3000); // could be longer, but there is a problem with volt
-}
-
-void pinIncorrect(){
-  lcd.clear();
-  writeInLcd(0, 0, "Falscher PIN!");
-  writeInLcd(0, 1, "Zugang verweigert");
-  digitalWrite(RED_LED_PIN, HIGH);
-  delay(3000);
-}
-
-// For adding New Rfids
-void addingMember(const String& uidStr){
-SerialPrintUidForAdding(uidStr); 
-}
-
-void checkRfid(const String& uidStr){
-  if (auth.isUIDAuthorized(uidStr)) {
-    String vorname = auth.getNameFromUID(uidStr);
-    greeting(vorname);
-    String pin = keypadInput(vorname);
-    
-    if(pin.length() == 4){
-    checkPin(uidStr, pin, vorname);
-    }
-
-    } else {
-      pinIncorrect();
-    }
-  }
-}
-
-void checkPin(const String& uidStr, const String& pin, const String& vorname){
-  bool pinIsCorrect = auth.isPinCorrect(uidStr, pin);
-    if(pinIsCorrect){
-      pinCorrect(vorname);
-    } else{
-      pinIncorrect();
-    }
-}
-
 void setup() {
   Serial.begin(9600);
-  SPI.begin();
-  mfrc522.PCD_Init();
-  lcd.init();
-  lcd.backlight();
-
   pinMode(RED_LED_PIN, OUTPUT);
   pinMode(GREEN_LED_PIN, OUTPUT);
   digitalWrite(RED_LED_PIN, LOW);
@@ -194,7 +95,7 @@ void setup() {
   // Startzustand: Schloss geschlossen (Relay aus)
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
-  writeInLcd(0, 0, "Ready for Check!");
+  display.writeInLcd(0, 0, "Ready for Check!");
 }
 
 void loop() {
@@ -203,7 +104,7 @@ void loop() {
   }
   String uidStr = readRFIDKey();
   uidStr.toUpperCase();
-  checkRfid(uidStr);
+  auth.checkRfid(uidStr);
   resetAfterCheck();
 
   mfrc522.PICC_HaltA();

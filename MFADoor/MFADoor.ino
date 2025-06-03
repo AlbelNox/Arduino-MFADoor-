@@ -4,7 +4,6 @@
 #include <MFRC522.h>
 #include <ArduinoJson.h>
 #include <Keypad.h>
-#include <string.h>
 #include "Authorization.h"
 
 #define SS_PIN 10           // RFID SDA
@@ -25,8 +24,8 @@ const char* jsonUIDs = R"rawliteral(
   { "uid": "A3081D06", "vorname": "Bea", "nachname": "Janott", "pin": "7559" }
 ]
 )rawliteral";
- 
-AUTHORIZATION_H::Authorization auth(jsonUIDs);
+
+Authorization auth(jsonUIDs);
 
 //---------------------
 //---keypad---
@@ -59,7 +58,6 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 //---------------------
 //---functions---
 //---------------------
-
 void writeInLcd(const int& positionlength, const int& positionHight, const String& message) {
   lcd.setCursor(positionlength, positionHight);
   lcd.print(message);
@@ -132,14 +130,13 @@ String keypadInput(const String& vorname) {
   return pinCode; //for timeout
 }
 
+
 void pinCorrect(const String& vorname){
 lcd.clear();
       writeInLcd(0, 0, "Zugang gewaehrt!");
       writeInLcd(0, 2, "Willkommen,");
       writeInLcd(0, 3, vorname);
-      digitalWrite(GREEN_LED_PIN, HIGH);
-      digitalWrite(RELAY_PIN, HIGH);
-      delay(3000); // could be longer, but there is a problem with volt
+      openDoor(2000);
 }
 
 void pinIncorrect(){
@@ -162,12 +159,15 @@ void checkRfid(const String& uidStr){
     String pin = keypadInput(vorname);
     
     if(pin.length() == 4){
-    checkPin(uidStr, pin, vorname);
+      if(auth.isPinCorrect(uidStr, pin)){
+        pinCorrect(vorname);
+      } else{
+        pinIncorrect();
+      }
+      //checkPin(uidStr, pin, vorname);
     }
-
-    } else {
-      pinIncorrect();
-    }
+  } else {
+    pinIncorrect();
   }
 }
 
@@ -178,6 +178,14 @@ void checkPin(const String& uidStr, const String& pin, const String& vorname){
     } else{
       pinIncorrect();
     }
+}
+
+void openDoor(int duration) {
+  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(6, HIGH);
+  delay(duration);
+  digitalWrite(6, LOW);
+  digitalWrite(RELAY_PIN, LOW);
 }
 
 void setup() {
@@ -194,6 +202,7 @@ void setup() {
   // Startzustand: Schloss geschlossen (Relay aus)
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
+
   writeInLcd(0, 0, "Ready for Check!");
 }
 
